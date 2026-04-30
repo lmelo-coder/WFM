@@ -12,36 +12,61 @@ URL_ESCALA = "https://docs.google.com/spreadsheets/d/1JD2KDxSAkezSeoF1Bi5h5w8Bit
 if 'autenticado' not in st.session_state:
     st.session_state.update({'autenticado': False, 'perfil': None, 'usuario_nome': "", 'status': "Disponível", 'inicio_status': datetime.now()})
 
+# --- FUNÇÃO DE DADOS MELHORADA ---
 def carregar_dados(url):
     try:
-        df = pd.read_csv(url)
+        # Adicionamos um parâmetro aleatório no final da URL para "quebrar" o cache do Google
+        # Isso força o Streamlit a ler a versão MAIS NOVA da planilha
+        cache_buster = f"&cache={time.time()}"
+        df = pd.read_csv(url + cache_buster)
+        
+        # Limpeza total: colunas em minúsculo e sem espaços
         df.columns = df.columns.str.strip().str.lower()
+        
+        # Remove espaços em branco de todas as células de texto (evita erro de digitação)
+        df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+        
         return df
-    except: return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Erro ao carregar planilha: {e}")
+        return pd.DataFrame()
 
-def formatar_tempo(inicio):
-    diff = datetime.now() - inicio
-    m, s = divmod(int(diff.total_seconds()), 60)
-    h, m = divmod(m, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
-
-# --- TELA DE LOGIN ---
+# --- TELA DE LOGIN BLINDADA ---
 def tela_login():
     st.markdown("<h2 style='text-align: center;'>Portal WFM ConvertaX</h2>", unsafe_allow_html=True)
+    
+    # Forçamos a recarga toda vez que a tela de login aparece
     df_users = carregar_dados(URL_ACESSOS)
+    
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         with st.form("login"):
+            # O .strip().lower() garante que "Usuario@Email.com " vire "usuario@email.com"
             email = st.text_input("E-mail Corporativo").strip().lower()
-            senha = st.text_input("Senha", type="password")
+            senha = st.text_input("Senha", type="password").strip()
+            
             if st.form_submit_button("Entrar", use_container_width=True):
-                if not df_users.empty and email in df_users['email'].values:
-                    user_data = df_users[df_users['email'] == email].iloc[0]
-                    if str(user_data['senha']) == str(senha):
-                        st.session_state.update({'autenticado': True, 'perfil': user_data['perfil'], 'usuario_nome': user_data['nome']})
-                        st.rerun()
-                st.error("Erro no login.")
-
+                if not df_users.empty:
+                    # Filtra o usuário ignorando maiúsculas
+                    user_match = df_users[df_users['email'].str.lower() == email]
+                    
+                    if not user_match.empty:
+                        # Pega a senha da planilha e transforma em string para comparar
+                        senha_planilha = str(user_match.iloc[0]['senha'])
+                        
+                        if senha_planilha == senha:
+                            st.session_state.update({
+                                'autenticado': True,
+                                'perfil': user_match.iloc[0]['perfil'],
+                                'usuario_nome': user_match.iloc[0]['nome']
+                            })
+                            st.rerun()
+                        else:
+                            st.error("Senha incorreta.")
+                    else:
+                        st.error("E-mail não cadastrado na base.")
+                else:
+                    st.warning("Base de dados inacessível. Verifique a conexão.")
 # --- 🟢 VISÃO DO AGENTE (CRONÔMETRO + ESCALA INDIVIDUAL) ---
 # --- 🟢 VISÃO DO AGENTE (CRONÔMETRO + ESCALA + COLEGAS) ---
 def tela_agente():
