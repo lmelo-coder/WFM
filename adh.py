@@ -88,79 +88,114 @@ def tela_login():
                         st.rerun()
                 st.error("Credenciais inválidas.")
 
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+import time
+import pytz
+
+# --- FUNÇÃO DE APOIO PARA O GRUPO ---
+def determinar_status_estilizado(nome_colega):
+    # Simulação de status (No futuro, isso lerá a aba 'Logs' da planilha central)
+    # Por enquanto, exibe a escala para orientação do time
+    return "🕒 Agendado"
+
+# --- TELA DO AGENTE ATUALIZADA ---
 def tela_agente():
-    # Cabeçalho com horário de Brasília
-    st.markdown(f"### Expert: {st.session_state.usuario_nome} | 🟢 Login: {st.session_state.hora_login} | 🕒 Agora: {get_brasilia_time().strftime('%H:%M:%S')}")
+    agora_br = get_brasilia_time()
+    st.markdown(f"### 🚀 Expert: {st.session_state.usuario_nome} | 🕒 {agora_br.strftime('%H:%M:%S')}")
     
     df_escala = carregar_dados(URL_ESCALA)
     p1, p2 = "00:00", "00:00"
+    
     if not df_escala.empty:
         user_row = df_escala[df_escala['nome'].str.lower() == st.session_state.usuario_nome.lower()]
         if not user_row.empty:
             p1, p2 = user_row.iloc[0]['pausa_1'], user_row.iloc[0]['pausa_2']
 
-    # --- INDICADORES DE ADERÊNCIA (Onde o agente vê que está atrasado) ---
+    # --- MÉTRICAS DE ADERÊNCIA ---
     m1, m2, m3 = st.columns(3)
     with m1:
-        st.metric("Pausa 1", p1, delta=verificar_aderencia(p1), delta_color="inverse")
+        st.metric("Minha Pausa 1", p1, delta=verificar_aderencia(p1), delta_color="inverse")
     with m2:
-        st.metric("Pausa 2", p2, delta=verificar_aderencia(p2), delta_color="inverse")
+        st.metric("Minha Pausa 2", p2, delta=verificar_aderencia(p2), delta_color="inverse")
     with m3:
-        st.metric("Cronômetro Ativo", formatar_tempo(st.session_state.inicio_status))
+        st.metric("Cronômetro Atual", formatar_tempo(st.session_state.inicio_status))
 
     st.divider()
 
-    col_main, col_side = st.columns([2, 1])
-    with col_main:
-        # Cronômetro visual
-        cor_cronometro = "#ff4b4b" if "ATRASADO" in verificar_aderencia(p1) or "ATRASADO" in verificar_aderencia(p2) else "#00d1b2"
+    # --- LAYOUT PRINCIPAL ---
+    col_status, col_time = st.columns([1.5, 1])
+
+    with col_status:
+        st.subheader("🕹️ Meu Controle")
+        cor_alerta = "#ff4b4b" if "ATRASADO" in verificar_aderencia(p1) else "#00d1b2"
         
         st.markdown(f"""
-            <div style='text-align:center; background-color:#1e1e1e; padding:20px; border-radius:15px; border:2px solid {cor_cronometro};'>
-                <p style='margin:0; font-size:18px;'>STATUS ATUAL: <b>{st.session_state.status.upper()}</b></p>
-                <h1 style='color:{cor_cronometro}; font-family:monospace; font-size:80px; margin:0;'>{formatar_tempo(st.session_state.inicio_status)}</h1>
+            <div style='text-align:center; background-color:#1e1e1e; padding:30px; border-radius:15px; border:3px solid {cor_alerta};'>
+                <p style='margin:0; font-size:20px; color:#bbb;'>STATUS ATUAL</p>
+                <h2 style='margin:0; color:white;'>{st.session_state.status.upper()}</h2>
+                <h1 style='color:{cor_alerta}; font-family:monospace; font-size:85px; margin:10px 0;'>{formatar_tempo(st.session_state.inicio_status)}</h1>
             </div>
         """, unsafe_allow_html=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
-
+        
+        # Botões de Status (Mesma lógica anterior)
         if st.session_state.status == "Offline":
-            if st.button("🏁 FICAR DISPONÍVEL (COMEÇAR TURNO)", type="primary", use_container_width=True):
+            if st.button("🏁 INICIAR TURNO", type="primary", use_container_width=True):
                 st.session_state.update({'status': "Disponível", 'inicio_status': get_brasilia_time()})
                 registrar_log("Início de Turno")
                 st.rerun()
-
         elif st.session_state.status == "Disponível":
-            cols = st.columns(3)
-            if cols[0].button("☕ Pausa Escala", use_container_width=True):
-                st.session_state.update({'status': "Em Pausa Escala", 'inicio_status': get_brasilia_time()})
-                registrar_log("Início Pausa Escala")
-                st.rerun()
-            if cols[1].button("🚻 Banheiro", use_container_width=True):
+            c_b1, c_b2, c_b3 = st.columns(3)
+            if c_b1.button("☕ Pausa 1", use_container_width=True):
+                st.session_state.update({'status': "Em Pausa 1", 'inicio_status': get_brasilia_time()})
+                registrar_log("Início Pausa 1"); st.rerun()
+            if c_b2.button("🚻 Banheiro", use_container_width=True):
                 st.session_state.update({'status': "Banheiro", 'inicio_status': get_brasilia_time()})
-                registrar_log("Início Banheiro")
-                st.rerun()
-            if cols[2].button("🏥 Médico/FB", use_container_width=True):
+                registrar_log("Início Banheiro"); st.rerun()
+            if c_b3.button("🏥 Médico/FB", use_container_width=True):
                 st.session_state.update({'status': "Médico/Feedback", 'inicio_status': get_brasilia_time()})
-                registrar_log("Início Médico/Feedback")
-                st.rerun()
+                registrar_log("Início Médico/FB"); st.rerun()
         else:
-            if st.button("🟢 RETORNEI PARA DISPONÍVEL", type="primary", use_container_width=True):
-                registrar_log(f"Retorno de: {st.session_state.status}")
+            if st.button("🟢 RETORNEI (VOLTAR DISPONÍVEL)", type="primary", use_container_width=True):
+                registrar_log(f"Retorno de {st.session_state.status}")
                 st.session_state.update({'status': "Disponível", 'inicio_status': get_brasilia_time()})
                 st.rerun()
 
-    with col_side:
-        st.markdown("### 👥 Colegas (Mesmo Turno)")
+    with col_time:
+        st.subheader("👥 Autonomia de Time")
+        st.caption("Veja quem divide a janela de pausa com você:")
+        
         if not df_escala.empty:
-            colegas = df_escala[(df_escala['pausa_1'] == p1) & (df_escala['nome'] != st.session_state.usuario_nome)]
+            # Filtra colegas que têm a mesma Pausa 1 (Lanche)
+            colegas = df_escala[df_escala['pausa_1'] == p1].copy()
+            
             for _, row in colegas.iterrows():
-                st.info(f"👤 {row['nome']}")
+                is_me = " (Eu)" if row['nome'].lower() == st.session_state.usuario_nome.lower() else ""
+                # Estilização baseada em quem está com você
+                bg_color = "#2e3136" if is_me == "" else "#0e6355"
+                
+                st.markdown(f"""
+                    <div style='background-color:{bg_color}; padding:12px; border-radius:8px; margin-bottom:8px; border-left:5px solid #00d1b2;'>
+                        <div style='display:flex; justify-content:between; align-items:center;'>
+                            <b style='font-size:16px;'>{row['nome']}{is_me}</b>
+                        </div>
+                        <div style='display:flex; justify-content:space-between; font-size:13px; color:#aaa;'>
+                            <span>Previsto: {row['pausa_1']}</span>
+                            <span style='color:#00d1b2;'>Status: {determinar_status_estilizado(row['nome'])}</span>
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.warning("Escala não carregada.")
 
+    # --- HISTÓRICO ---
     st.divider()
-    st.subheader("📝 Registro de Atividades")
-    if st.session_state.historico_pausas:
-        st.dataframe(pd.DataFrame(st.session_state.historico_pausas), use_container_width=True)
+    with st.expander("📝 Meu Histórico de Registros (Hoje)", expanded=False):
+        if st.session_state.historico_pausas:
+            st.dataframe(pd.DataFrame(st.session_state.historico_pausas), use_container_width=True)
 
 # --- 6. ADMIN / NAVEGAÇÃO ---
 if not st.session_state.autenticado:
