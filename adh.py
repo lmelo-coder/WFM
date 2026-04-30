@@ -3,73 +3,108 @@ import pandas as pd
 from datetime import datetime, timedelta
 import time
 
-# --- FUNÇÕES DE APOIO ---
+# --- 1. INICIALIZAÇÃO DO ESTADO (EVITA O ERRO ATTRIBUTERROR) ---
+if 'autenticado' not in st.session_state:
+    st.session_state.autenticado = False
+    st.session_state.perfil = None
+    st.session_state.usuario_nome = ""
+    st.session_state.status = "Disponível"
+    st.session_state.inicio_status = datetime.now()
+
+# --- 2. CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="WFM ConvertaX", layout="wide", initial_sidebar_state="expanded")
+
+# CSS para Estilização
+st.markdown("""
+    <style>
+    .main { background-color: #0e1117; }
+    .cronometro { font-size: 60px; font-weight: bold; text-align: center; color: #00d1b2; padding: 10px; }
+    .card-esteira { background-color: #1e1e1e; border-radius: 10px; padding: 15px; border: 1px solid #333; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 3. FUNÇÕES DE APOIO ---
 def calcular_tempo(inicio):
-    """Calcula a diferença entre agora e o início do status"""
     if not inicio: return "00:00"
     diff = datetime.now() - inicio
     minutos, segundos = divmod(diff.seconds, 60)
     return f"{minutos:02d}:{segundos:02d}"
 
-# --- VISÃO DO AGENTE ---
-def tela_agente():
-    st.title(f"Painel do Expert: {st.session_state.usuario_nome}")
-    
-    # Simulação de dados vindo do banco
-    status_atual = st.session_state.get('status', 'Disponível')
-    inicio_status = st.session_state.get('inicio_status', datetime.now())
+# Banco de dados temporário (Será substituído pelo Google Sheets)
+usuarios_db = {
+    "admin@convertax.com.br": {"nome": "Supervisor WFM", "perfil": "Admin", "senha": "admin"},
+    "agente@convertax.com.br": {"nome": "Expert ConvertaX", "perfil": "Agente", "senha": "123"}
+}
 
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric("Status Atual", status_atual)
+# --- 4. TELAS DO SISTEMA ---
+
+def tela_login():
+    st.markdown("<h1 style='text-align: center;'>🔐 Login WFM ConvertaX</h1>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1,2,1])
     with col2:
-        # Cronômetro de tempo no status atual
-        tempo_decorrido = calcular_tempo(inicio_status)
-        st.metric("Tempo no Status", tempo_decorrido)
-    with col3:
-        st.metric("Sua Próxima Pausa", "21:30")
+        with st.form("form_login"):
+            email = st.text_input("E-mail")
+            senha = st.text_input("Senha", type="password")
+            if st.form_submit_button("Entrar", use_container_width=True):
+                if email in usuarios_db and usuarios_db[email]['senha'] == senha:
+                    st.session_state.autenticado = True
+                    st.session_state.perfil = usuarios_db[email]['perfil']
+                    st.session_state.usuario_nome = usuarios_db[email]['nome']
+                    st.rerun()
+                else:
+                    st.error("Credenciais inválidas.")
 
-    # Botões de Ação
-    c1, c2 = st.columns(2)
-    if status_atual != "Em Pausa":
-        if c1.button("☕ INICIAR PAUSA", use_container_width=True):
+def exibir_esteira():
+    st.subheader("📋 Esteira de Operação (Tempo Real)")
+    # Simulação de dados (Isso virá do Sheets para todos verem a mesma coisa)
+    dados = [
+        {"Agente": st.session_state.usuario_nome, "Status": st.session_state.status, "Início": st.session_state.inicio_status, "Pausa": "21:30"},
+        {"Agente": "Lucas Ryann", "Status": "Em Atendimento", "Início": datetime.now() - timedelta(minutes=15), "Pausa": "21:00"},
+        {"Agente": "Francielle", "Status": "Disponível", "Início": datetime.now() - timedelta(minutes=5), "Pausa": "21:00"}
+    ]
+    df = pd.DataFrame(dados)
+    df['Tempo'] = df['Início'].apply(calcular_tempo)
+    
+    # Exibição estilizada
+    st.dataframe(df[['Agente', 'Status', 'Tempo', 'Pausa']], use_container_width=True, hide_index=True)
+
+def tela_agente():
+    st.title(f"🚀 Painel do Expert")
+    
+    with st.container(border=True):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Seu Status", st.session_state.status)
+        c2.metric("Tempo no Status", calcular_tempo(st.session_state.inicio_status))
+        c3.metric("Próxima Pausa", "21:30")
+
+    col_btn1, col_btn2 = st.columns(2)
+    if st.session_state.status != "Em Pausa":
+        if col_btn1.button("☕ INICIAR MINHA PAUSA", use_container_width=True, type="primary"):
             st.session_state.status = "Em Pausa"
             st.session_state.inicio_status = datetime.now()
-            # AQUI: Comando para salvar na planilha: status='Em Pausa'
             st.rerun()
     else:
-        if c1.button("🟢 VOLTAR PARA ATENDIMENTO", use_container_width=True):
+        if col_btn1.button("🟢 VOLTAR AO ATENDIMENTO", use_container_width=True):
             st.session_state.status = "Em Atendimento"
             st.session_state.inicio_status = datetime.now()
             st.rerun()
 
     st.divider()
-    exibir_esteira_geral()
+    exibir_esteira()
 
-# --- A ESTEIRA (VISÃO PARA TODOS) ---
-def exibir_esteira_geral():
-    st.subheader("📋 Esteira de Operação em Tempo Real")
+def tela_admin():
+    st.title("🛡️ Dashboard de Supervisão")
+    st.write("Visão macro da operação e aderência.")
     
-    # Simulação de dados de todos os agentes (Isso virá do seu Sheets)
-    dados_esteira = [
-        {"Agente": "Francielle", "Status": "Em Atendimento", "Início": datetime.now() - timedelta(minutes=45), "Pausa": "21:00"},
-        {"Agente": "Lucas Ryann", "Status": "Em Pausa", "Início": datetime.now() - timedelta(minutes=5), "Pausa": "21:00"},
-        {"Agente": "Gabriele", "Status": "Disponível", "Início": datetime.now() - timedelta(minutes=2), "Pausa": "21:10"},
-    ]
+    exibir_esteira()
     
-    df_esteira = pd.DataFrame(dados_esteira)
-    df_esteira['Tempo no Status'] = df_esteira['Início'].apply(calcular_tempo)
+    st.divider()
+    st.subheader("🚨 Último Incidente Registrado")
+    st.error("Lentidão Backoffice (Brands CASSINO/VERA) - 23:41")
 
-    # Estilização da Tabela
-    def color_status(val):
-        color = '#00d1b2' if val == 'Em Atendimento' else '#ff4b4b' if val == 'Em Pausa' else '#fdfd96'
-        return f'color: {color}; font-weight: bold'
+# --- 5. LÓGICA DE NAVEGAÇÃO ---
 
-    st.table(df_esteira[['Agente', 'Status', 'Tempo no Status', 'Pausa']].style.applymap(color_status, subset=['Status']))
-
-# --- ATUALIZAÇÃO AUTOMÁTICA ---
-# Isso faz o site atualizar sozinho a cada 30 segundos para mostrar o tempo correndo
-if st.session_state.autenticado:
-    time.sleep(30)
-    st.rerun()
+if not st.session_state.autenticado:
+    tela_login()
+else:
+    # Botão de Logout
