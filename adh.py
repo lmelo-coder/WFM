@@ -3,173 +3,168 @@ import pandas as pd
 from datetime import datetime
 import time
 
-# --- CONFIGURAÇÃO E DADOS ---
+# --- 1. CONFIGURAÇÃO DE DESIGN (UI/UX) ---
 st.set_page_config(page_title="WFM ConvertaX", layout="wide", page_icon="🚀")
 
+# CSS Customizado para deixar o painel com cara de App profissional
+st.markdown("""
+    <style>
+    /* Estilização dos Cards */
+    .stMetric {
+        background-color: #1e1e1e;
+        padding: 20px;
+        border-radius: 15px;
+        border: 1px solid #333;
+        box-shadow: 2px 2px 10px rgba(0,0,0,0.5);
+    }
+    /* Título do Cronômetro */
+    .timer-text {
+        font-family: 'Courier New', Courier, monospace;
+        color: #00d1b2;
+        text-shadow: 0px 0px 10px #00d1b2;
+    }
+    /* Estilização da Tabela de Colegas */
+    .colega-card {
+        background-color: #262730;
+        padding: 12px;
+        border-radius: 10px;
+        margin-bottom: 8px;
+        border-left: 4px solid #fdfd96;
+    }
+    /* Botões Grandes */
+    .stButton>button {
+        height: 3em;
+        border-radius: 10px;
+        font-weight: bold;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 2. CONFIGURAÇÃO DE DADOS ---
 URL_ACESSOS = "https://docs.google.com/spreadsheets/d/1JD2KDxSAkezSeoF1Bi5h5w8BitIzip7IuR0g19fdouU/gviz/tq?tqx=out:csv&sheet=Acessos"
 URL_ESCALA = "https://docs.google.com/spreadsheets/d/1JD2KDxSAkezSeoF1Bi5h5w8BitIzip7IuR0g19fdouU/gviz/tq?tqx=out:csv&sheet=Escala"
 
 if 'autenticado' not in st.session_state:
     st.session_state.update({'autenticado': False, 'perfil': None, 'usuario_nome': "", 'status': "Disponível", 'inicio_status': datetime.now()})
 
-# --- FUNÇÃO DE DADOS MELHORADA ---
 def carregar_dados(url):
     try:
-        # Adicionamos um parâmetro aleatório no final da URL para "quebrar" o cache do Google
-        # Isso força o Streamlit a ler a versão MAIS NOVA da planilha
-        cache_buster = f"&cache={time.time()}"
-        df = pd.read_csv(url + cache_buster)
-        
-        # Limpeza total: colunas em minúsculo e sem espaços
+        df = pd.read_csv(url + f"&cache={time.time()}")
         df.columns = df.columns.str.strip().str.lower()
-        
-        # Remove espaços em branco de todas as células de texto (evita erro de digitação)
-        df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-        
-        return df
-    except Exception as e:
-        st.error(f"Erro ao carregar planilha: {e}")
-        return pd.DataFrame()
+        return df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+    except: return pd.DataFrame()
 
-# --- TELA DE LOGIN BLINDADA ---
+def formatar_tempo(inicio):
+    diff = datetime.now() - inicio
+    m, s = divmod(int(diff.total_seconds()), 60)
+    h, m = divmod(m, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+# --- 3. TELAS ---
+
 def tela_login():
-    st.markdown("<h2 style='text-align: center;'>Portal WFM ConvertaX</h2>", unsafe_allow_html=True)
-    
-    # Forçamos a recarga toda vez que a tela de login aparece
+    st.markdown("<h1 style='text-align: center; color: white;'>🚀 ConvertaX <span style='color: #00d1b2;'>WFM</span></h1>", unsafe_allow_html=True)
     df_users = carregar_dados(URL_ACESSOS)
-    
-    col1, col2, col3 = st.columns([1,2,1])
+    col1, col2, col3 = st.columns([1,1.5,1])
     with col2:
         with st.form("login"):
-            # O .strip().lower() garante que "Usuario@Email.com " vire "usuario@email.com"
             email = st.text_input("E-mail Corporativo").strip().lower()
             senha = st.text_input("Senha", type="password").strip()
-            
-            if st.form_submit_button("Entrar", use_container_width=True):
-                if not df_users.empty:
-                    # Filtra o usuário ignorando maiúsculas
-                    user_match = df_users[df_users['email'].str.lower() == email]
-                    
-                    if not user_match.empty:
-                        # Pega a senha da planilha e transforma em string para comparar
-                        senha_planilha = str(user_match.iloc[0]['senha'])
-                        
-                        if senha_planilha == senha:
-                            st.session_state.update({
-                                'autenticado': True,
-                                'perfil': user_match.iloc[0]['perfil'],
-                                'usuario_nome': user_match.iloc[0]['nome']
-                            })
-                            st.rerun()
-                        else:
-                            st.error("Senha incorreta.")
-                    else:
-                        st.error("E-mail não cadastrado na base.")
-                else:
-                    st.warning("Base de dados inacessível. Verifique a conexão.")
-# --- 🟢 VISÃO DO AGENTE (CRONÔMETRO + ESCALA INDIVIDUAL) ---
-# --- 🟢 VISÃO DO AGENTE (CRONÔMETRO + ESCALA + COLEGAS) ---
+            if st.form_submit_button("ACESSAR PAINEL", use_container_width=True):
+                user_match = df_users[df_users['email'].str.lower() == email] if not df_users.empty else pd.DataFrame()
+                if not user_match.empty and str(user_match.iloc[0]['senha']) == senha:
+                    st.session_state.update({'autenticado': True, 'perfil': user_match.iloc[0]['perfil'], 'usuario_nome': user_match.iloc[0]['nome']})
+                    st.rerun()
+                else: st.error("Acesso negado. Verifique e-mail e senha.")
+
 def tela_agente():
-    st.title(f"🚀 Painel do Expert: {st.session_state.usuario_nome}")
+    # Header Principal
+    c_logo, c_nome = st.columns([0.1, 0.9])
+    with c_nome:
+        st.title(f"Bem-vindo, {st.session_state.usuario_nome}")
     
-    # 1. CARREGA DADOS DA PLANILHA
+    # Busca Escala
     df_escala = carregar_dados(URL_ESCALA)
-    
-    p1, p2, meu_grupo = "--:--", "--:--", None
-    
+    p1, p2, meu_grupo = "--:--", "--:--", ""
     if not df_escala.empty:
-        # Busca dados do usuário logado
         user_row = df_escala[df_escala['nome'].str.lower() == st.session_state.usuario_nome.lower()]
         if not user_row.empty:
-            p1 = user_row.iloc[0]['pausa_1']
-            p2 = user_row.iloc[0]['pausa_2']
-            # Vamos supor que você tenha uma coluna 'grupo' ou use o horário da Pausa 1 como referência
-            meu_grupo = user_row.iloc[0]['pausa_1'] 
+            p1, p2, meu_grupo = user_row.iloc[0]['pausa_1'], user_row.iloc[0]['pausa_2'], user_row.iloc[0]['pausa_1']
 
-    # 2. MÉTRICAS INDIVIDUAIS
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Sua Pausa 1", p1)
-    c2.metric("Sua Pausa 2", p2)
-    c3.metric("Tempo em Status", formatar_tempo(st.session_state.inicio_status))
-
-    st.divider()
-
-    # 3. ÁREA DE FOCO (CRONÔMETRO)
-    col_esq, col_dir = st.columns([1.5, 1])
-    
-    with col_esq:
-        st.markdown(f"<p style='text-align: center; margin-bottom: -20px;'>Status: <b>{st.session_state.status}</b></p>", unsafe_allow_html=True)
-        st.markdown(f"<h1 style='text-align: center; color: #00d1b2; font-size: 90px; font-family: monospace;'>{formatar_tempo(st.session_state.inicio_status)}</h1>", unsafe_allow_html=True)
-        
-        if st.session_state.status != "Em Pausa":
-            if st.button("☕ INICIAR PAUSA", type="primary", use_container_width=True):
-                st.session_state.status = "Em Pausa"; st.session_state.inicio_status = datetime.now(); st.rerun()
-        else:
-            if st.button("🟢 RETORNAR", use_container_width=True):
-                st.session_state.status = "Disponível"; st.session_state.inicio_status = datetime.now(); st.rerun()
-
-    with col_dir:
-        # 4. VISÃO DOS COLEGAS (QUEM SAI JUNTO COMIGO?)
-        st.write("### 👥 Colegas de Turno/Pausa")
-        if not df_escala.empty and meu_grupo:
-            # Filtra colegas que têm a mesma Pausa 1 que o usuário, excluindo ele mesmo
-            colegas = df_escala[(df_escala['pausa_1'] == meu_grupo) & (df_escala['nome'].str.lower() != st.session_state.usuario_nome.lower())]
-            
-            if not colegas.empty:
-                # Criamos uma visualização simples de cartões ou tabela
-                for _, row in colegas.iterrows():
-                    # No futuro, o status virá da aba de Status Real
-                    st.markdown(f"""
-                        <div style='background-color: #262730; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 3px solid #fdfd96;'>
-                            <b>{row['nome']}</b> | Pausas: {row['pausa_1']} - {row['pausa_2']}
-                        </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.write("Nenhum colega mapeado para este horário.")
-        else:
-            st.info("Escala não disponível para consulta de grupo.")
-
-    st.divider()
-    # Incidente aparece para o agente também para ele ficar ciente
-    st.warning("⚠️ **Nota da Supervisão:** Fique atento aos incidentes no topo da página.")
-
-# --- 🛡️ VISÃO DO ADMIN (CONTROLE GERAL + INCIDENTES) ---
-def tela_admin():
-    st.title("🛡️ Painel Admin - Gestão ConvertaX")
-    
-    # 1. KPIs DE OPERAÇÃO
+    # --- LINHA 1: METRICAS ---
     m1, m2, m3 = st.columns(3)
-    m1.metric("Experts Online", "15") # Exemplo estático
-    m2.metric("Quebra de Aderência", "2", delta="Atenção", delta_color="inverse")
-    m3.metric("NPS Médio", "9.2")
+    with m1: st.metric("Lanche (P1)", p1)
+    with m2: st.metric("Descanso (P2)", p2)
+    with m3: st.metric("Sessão Atual", formatar_tempo(st.session_state.inicio_status))
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # --- LINHA 2: FOCO OPERACIONAL ---
+    col_main, col_side = st.columns([2, 1])
+
+    with col_main:
+        with st.container(border=True):
+            st.markdown(f"<p style='text-align: center; font-size: 1.2rem; color: #888;'>STATUS: <b>{st.session_state.status.upper()}</b></p>", unsafe_allow_html=True)
+            st.markdown(f"<h1 class='timer-text' style='text-align: center; font-size: 120px; margin-top: -20px;'>{formatar_tempo(st.session_state.inicio_status)}</h1>", unsafe_allow_html=True)
+            
+            c_btn1, c_btn2, c_btn3 = st.columns([1,2,1])
+            with c_btn2:
+                if st.session_state.status != "Em Pausa":
+                    if st.button("☕ INICIAR PAUSA", type="primary", use_container_width=True):
+                        st.session_state.status = "Em Pausa"; st.session_state.inicio_status = datetime.now(); st.rerun()
+                else:
+                    if st.button("🟢 VOLTAR AO TRABALHO", use_container_width=True):
+                        st.session_state.status = "Disponível"; st.session_state.inicio_status = datetime.now(); st.rerun()
+
+    with col_side:
+        st.markdown("### 👥 Meu Grupo")
+        if not df_escala.empty:
+            colegas = df_escala[(df_escala['pausa_1'] == meu_grupo) & (df_escala['nome'].str.lower() != st.session_state.usuario_nome.lower())]
+            if not colegas.empty:
+                for _, row in colegas.iterrows():
+                    st.markdown(f"<div class='colega-card'>👤 <b>{row['nome']}</b><br><small>Pausas: {row['pausa_1']} | {row['pausa_2']}</small></div>", unsafe_allow_html=True)
+            else: st.caption("Nenhum colega no mesmo horário.")
+
+    # Mural de Avisos
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander("📢 Mural de Avisos da Supervisão", expanded=True):
+        st.warning("⚠️ **Lentidão detectada:** Backoffice CASSINO/VERA. Não abrir chamados duplicados.")
+
+def tela_admin():
+    st.title("🛡️ Painel de Gestão WFM")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Experts Online", "18")
+    m2.metric("Em Pausa", "4")
+    m3.metric("Aderência Dia", "94%")
+    m4.metric("NPS Acumulado", "9.1")
 
     st.divider()
-
-    # 2. ESTEIRA DE OPERAÇÃO COMPLETA
-    st.subheader("📋 Visão de Escala do Time")
-    df_escala = carregar_dados(URL_ESCALA)
-    if not df_escala.empty:
-        # Aqui o Admin vê a lista de TODO MUNDO
+    
+    col_tab, col_inc = st.columns([2, 1])
+    with col_tab:
+        st.subheader("📊 Escala Geral")
+        df_escala = carregar_dados(URL_ESCALA)
         st.dataframe(df_escala, use_container_width=True, hide_index=True)
     
-    st.divider()
-    
-    # 3. MURAL DE INCIDENTES (O que você formatou antes)
-    st.error("🚨 **INCIDENTE ATIVO:** Lentidão Backoffice Brands CASSINO/VERA - Identificado às 23:41")
-    st.info("💡 **Ação:** Orientar time a realizar limpeza de cache e aguardar normalização.")
+    with col_inc:
+        st.subheader("🚩 Incidentes Ativos")
+        st.error("**[CRÍTICO]** Lentidão Sistema de Pagamentos\n\n*Início: 10:20*")
+        st.info("**[INFO]** Atualização de script de atendimento disponível no Drive.")
 
-# --- LÓGICA DE NAVEGAÇÃO ---
+# --- 4. EXECUÇÃO ---
 if not st.session_state.autenticado:
     tela_login()
 else:
-    st.sidebar.subheader(f"Logado: {st.session_state.usuario_nome}")
-    if st.sidebar.button("Sair"):
-        st.session_state.autenticado = False; st.rerun()
+    with st.sidebar:
+        st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=100)
+        st.title("Menu")
+        st.write(f"Usuário: **{st.session_state.usuario_nome}**")
+        st.write(f"Perfil: {st.session_state.perfil}")
+        if st.button("🚪 Sair do Sistema", use_container_width=True):
+            st.session_state.autenticado = False; st.rerun()
     
-    if st.session_state.perfil == "Admin":
-        tela_admin()
-    else:
-        tela_agente()
+    if st.session_state.perfil == "Admin": tela_admin()
+    else: tela_agente()
     
     time.sleep(1)
     st.rerun()
