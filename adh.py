@@ -1,52 +1,26 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 
-# --- 1. CONFIGURAÇÃO DE DESIGN (UI/UX) ---
+# --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="WFM ConvertaX", layout="wide", page_icon="🚀")
 
-# CSS Customizado para deixar o painel com cara de App profissional
-st.markdown("""
-    <style>
-    /* Estilização dos Cards */
-    .stMetric {
-        background-color: #1e1e1e;
-        padding: 20px;
-        border-radius: 15px;
-        border: 1px solid #333;
-        box-shadow: 2px 2px 10px rgba(0,0,0,0.5);
-    }
-    /* Título do Cronômetro */
-    .timer-text {
-        font-family: 'Courier New', Courier, monospace;
-        color: #00d1b2;
-        text-shadow: 0px 0px 10px #00d1b2;
-    }
-    /* Estilização da Tabela de Colegas */
-    .colega-card {
-        background-color: #262730;
-        padding: 12px;
-        border-radius: 10px;
-        margin-bottom: 8px;
-        border-left: 4px solid #fdfd96;
-    }
-    /* Botões Grandes */
-    .stButton>button {
-        height: 3em;
-        border-radius: 10px;
-        font-weight: bold;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- 2. CONFIGURAÇÃO DE DADOS ---
+# URLs das Planilhas
 URL_ACESSOS = "https://docs.google.com/spreadsheets/d/1JD2KDxSAkezSeoF1Bi5h5w8BitIzip7IuR0g19fdouU/gviz/tq?tqx=out:csv&sheet=Acessos"
 URL_ESCALA = "https://docs.google.com/spreadsheets/d/1JD2KDxSAkezSeoF1Bi5h5w8BitIzip7IuR0g19fdouU/gviz/tq?tqx=out:csv&sheet=Escala"
 
+# --- INICIALIZAÇÃO DO ESTADO ---
 if 'autenticado' not in st.session_state:
-    st.session_state.update({'autenticado': False, 'perfil': None, 'usuario_nome': "", 'status': "Disponível", 'inicio_status': datetime.now()})
+    st.session_state.update({
+        'autenticado': False,
+        'perfil': None,
+        'usuario_nome': "",
+        'status': "Disponível",
+        'inicio_status': datetime.now()
+    })
 
+# --- FUNÇÕES DE APOIO ---
 def carregar_dados(url):
     try:
         df = pd.read_csv(url + f"&cache={time.time()}")
@@ -60,111 +34,96 @@ def formatar_tempo(inicio):
     h, m = divmod(m, 60)
     return f"{h:02d}:{m:02d}:{s:02d}"
 
-# --- 3. TELAS ---
+def calcular_atraso_aderencia(horario_planejado):
+    """Calcula se o agente já deveria ter iniciado a pausa"""
+    try:
+        agora = datetime.now()
+        hp = datetime.strptime(horario_planejado, "%H:%M").replace(
+            year=agora.year, month=agora.month, day=agora.day
+        )
+        atraso = (agora - hp).total_seconds() / 60
+        if atraso > 0 and st.session_state.status == "Disponível":
+            return f"⚠️ {int(atraso)} min atrasado"
+        return "✅ OK"
+    except: return "---"
 
-def tela_login():
-    st.markdown("<h1 style='text-align: center; color: white;'>🚀 ConvertaX <span style='color: #00d1b2;'>WFM</span></h1>", unsafe_allow_html=True)
-    df_users = carregar_dados(URL_ACESSOS)
-    col1, col2, col3 = st.columns([1,1.5,1])
-    with col2:
-        with st.form("login"):
-            email = st.text_input("E-mail Corporativo").strip().lower()
-            senha = st.text_input("Senha", type="password").strip()
-            if st.form_submit_button("ACESSAR PAINEL", use_container_width=True):
-                user_match = df_users[df_users['email'].str.lower() == email] if not df_users.empty else pd.DataFrame()
-                if not user_match.empty and str(user_match.iloc[0]['senha']) == senha:
-                    st.session_state.update({'autenticado': True, 'perfil': user_match.iloc[0]['perfil'], 'usuario_nome': user_match.iloc[0]['nome']})
-                    st.rerun()
-                else: st.error("Acesso negado. Verifique e-mail e senha.")
-
+# --- TELA DO AGENTE (DESIGN TURBINADO) ---
 def tela_agente():
-    # Header Principal
-    c_logo, c_nome = st.columns([0.1, 0.9])
-    with c_nome:
-        st.title(f"Bem-vindo, {st.session_state.usuario_nome}")
-    
-    # Busca Escala
+    # 1. Carregar escala individual
     df_escala = carregar_dados(URL_ESCALA)
-    p1, p2, meu_grupo = "--:--", "--:--", ""
+    p1, p2, inicio_t = "00:00", "00:00", "00:00"
+    
     if not df_escala.empty:
-        user_row = df_escala[df_escala['nome'].str.lower() == st.session_state.usuario_nome.lower()]
-        if not user_row.empty:
-            p1, p2, meu_grupo = user_row.iloc[0]['pausa_1'], user_row.iloc[0]['pausa_2'], user_row.iloc[0]['pausa_1']
+        user_data = df_escala[df_escala['nome'].str.lower() == st.session_state.usuario_nome.lower()]
+        if not user_data.empty:
+            p1 = user_data.iloc[0]['pausa_1']
+            p2 = user_data.iloc[0]['pausa_2']
+            inicio_t = user_data.iloc[0]['inicio_turno']
 
-    # --- LINHA 1: METRICAS ---
-    m1, m2, m3 = st.columns(3)
-    with m1: st.metric("Lanche (P1)", p1)
-    with m2: st.metric("Descanso (P2)", p2)
-    with m3: st.metric("Sessão Atual", formatar_tempo(st.session_state.inicio_status))
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # --- LINHA 2: FOCO OPERACIONAL ---
-    col_main, col_side = st.columns([2, 1])
-
-    with col_main:
-        with st.container(border=True):
-            st.markdown(f"<p style='text-align: center; font-size: 1.2rem; color: #888;'>STATUS: <b>{st.session_state.status.upper()}</b></p>", unsafe_allow_html=True)
-            st.markdown(f"<h1 class='timer-text' style='text-align: center; font-size: 120px; margin-top: -20px;'>{formatar_tempo(st.session_state.inicio_status)}</h1>", unsafe_allow_html=True)
-            
-            c_btn1, c_btn2, c_btn3 = st.columns([1,2,1])
-            with c_btn2:
-                if st.session_state.status != "Em Pausa":
-                    if st.button("☕ INICIAR PAUSA", type="primary", use_container_width=True):
-                        st.session_state.status = "Em Pausa"; st.session_state.inicio_status = datetime.now(); st.rerun()
-                else:
-                    if st.button("🟢 VOLTAR AO TRABALHO", use_container_width=True):
-                        st.session_state.status = "Disponível"; st.session_state.inicio_status = datetime.now(); st.rerun()
-
-    with col_side:
-        st.markdown("### 👥 Meu Grupo")
-        if not df_escala.empty:
-            colegas = df_escala[(df_escala['pausa_1'] == meu_grupo) & (df_escala['nome'].str.lower() != st.session_state.usuario_nome.lower())]
-            if not colegas.empty:
-                for _, row in colegas.iterrows():
-                    st.markdown(f"<div class='colega-card'>👤 <b>{row['nome']}</b><br><small>Pausas: {row['pausa_1']} | {row['pausa_2']}</small></div>", unsafe_allow_html=True)
-            else: st.caption("Nenhum colega no mesmo horário.")
-
-    # Mural de Avisos
-    st.markdown("<br>", unsafe_allow_html=True)
-    with st.expander("📢 Mural de Avisos da Supervisão", expanded=True):
-        st.warning("⚠️ **Lentidão detectada:** Backoffice CASSINO/VERA. Não abrir chamados duplicados.")
-
-def tela_admin():
-    st.title("🛡️ Painel de Gestão WFM")
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Experts Online", "18")
-    m2.metric("Em Pausa", "4")
-    m3.metric("Aderência Dia", "94%")
-    m4.metric("NPS Acumulado", "9.1")
+    # --- CABEÇALHO ---
+    st.markdown(f"### 🚀 Expert: {st.session_state.usuario_nome} | <span style='color:#00d1b2'>Turno: {inicio_t}</span>", unsafe_allow_html=True)
+    
+    # --- MÉTRICAS DE ADERÊNCIA ---
+    col_m1, col_m2, col_m3 = st.columns(3)
+    with col_m1:
+        st.metric("Pausa 1 (Lanche)", p1, delta=calcular_atraso_aderencia(p1), delta_color="inverse")
+    with col_m2:
+        st.metric("Pausa 2 (Descanso)", p2, delta=calcular_atraso_aderencia(p2), delta_color="inverse")
+    with col_m3:
+        st.metric("Tempo em Status", formatar_tempo(st.session_state.inicio_status))
 
     st.divider()
-    
-    col_tab, col_inc = st.columns([2, 1])
-    with col_tab:
-        st.subheader("📊 Escala Geral")
-        df_escala = carregar_dados(URL_ESCALA)
-        st.dataframe(df_escala, use_container_width=True, hide_index=True)
-    
-    with col_inc:
-        st.subheader("🚩 Incidentes Ativos")
-        st.error("**[CRÍTICO]** Lentidão Sistema de Pagamentos\n\n*Início: 10:20*")
-        st.info("**[INFO]** Atualização de script de atendimento disponível no Drive.")
 
-# --- 4. EXECUÇÃO ---
-if not st.session_state.autenticado:
-    tela_login()
-else:
-    with st.sidebar:
-        st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=100)
-        st.title("Menu")
-        st.write(f"Usuário: **{st.session_state.usuario_nome}**")
-        st.write(f"Perfil: {st.session_state.perfil}")
-        if st.button("🚪 Sair do Sistema", use_container_width=True):
-            st.session_state.autenticado = False; st.rerun()
-    
-    if st.session_state.perfil == "Admin": tela_admin()
-    else: tela_agente()
-    
-    time.sleep(1)
-    st.rerun()
+    # --- CORPO PRINCIPAL ---
+    c_status, c_botoes = st.columns([1.5, 1])
+
+    with c_status:
+        st.markdown(f"<div style='text-align:center; background-color:#1e1e1e; padding:30px; border-radius:15px; border: 1px solid #333;'>", unsafe_allow_html=True)
+        st.write(f"Status Atual: **{st.session_state.status.upper()}**")
+        st.markdown(f"<h1 style='font-size:100px; color:#00d1b2; font-family:monospace; margin:0;'>{formatar_tempo(st.session_state.inicio_status)}</h1>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        # Notificação de 3 minutos via Toast
+        agora_str = datetime.now().strftime("%H:%M")
+        try:
+            alerta_p1 = (datetime.strptime(p1, "%H:%M") - timedelta(minutes=3)).strftime("%H:%M")
+            if agora_str == alerta_p1:
+                st.toast(f"⏰ {st.session_state.usuario_nome}, faltam 3 min para sua Pausa 1!", icon="⚠️")
+        except: pass
+
+    with c_botoes:
+        st.write("### Selecione o Status")
+        if st.session_state.status == "Disponível":
+            if st.button("☕ INICIAR PAUSA ESCALA", use_container_width=True, type="primary"):
+                st.session_state.update({'status': "Pausa Programada", 'inicio_status': datetime.now()}); st.rerun()
+            
+            if st.button("🚻 BANHEIRO / PARTICULAR", use_container_width=True):
+                st.session_state.update({'status': "Pausa Particular", 'inicio_status': datetime.now()}); st.rerun()
+
+            if st.button("🏥 MÉDICO / FEEDBACK", use_container_width=True):
+                st.session_state.update({'status': "Médico / Feedback", 'inicio_status': datetime.now()}); st.rerun()
+        else:
+            if st.button("🟢 FINALIZAR E VOLTAR DISPONÍVEL", use_container_width=True, type="primary"):
+                st.session_state.update({'status': "Disponível", 'inicio_status': datetime.now()}); st.rerun()
+
+    # --- ESTEIRA DE COLEGAS (CONSCIÊNCIA DE TIME) ---
+    st.divider()
+    st.subheader("👥 Time no mesmo horário")
+    if not df_escala.empty:
+        colegas = df_escala[(df_escala['pausa_1'] == p1) & (df_escala['nome'].str.lower() != st.session_state.usuario_nome.lower())]
+        if not colegas.empty:
+            cols = st.columns(len(colegas) if len(colegas) < 5 else 5)
+            for idx, row in colegas.iterrows():
+                with cols[idx % 5]:
+                    st.markdown(f"<div style='padding:10px; border:1px solid #444; border-radius:5px; text-align:center;'><b>{row['nome']}</b><br><small>P1: {row['pausa_1']}</small></div>", unsafe_allow_html=True)
+        else:
+            st.info("Você é o único expert mapeado para este horário de pausa.")
+
+# --- TELA ADMIN (BÁSICA POR ENQUANTO) ---
+def tela_admin():
+    st.title("🛡️ Admin WFM - Visão Geral")
+    df_escala = carregar_dados(URL_ESCALA)
+    st.dataframe(df_escala, use_container_width=True, hide_index=True)
+
+# --- NAVEGAÇÃO ---
+# [Aqui continua sua tela de login e lógica de sessão igual ao anterior]
