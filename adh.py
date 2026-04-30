@@ -1,18 +1,66 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
-import pytz # Certifique-se de que está no seu requirements.txt
+import pytz
 
-# --- 1. CONFIGURAÇÃO ---
+# --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="WFM ConvertaX", layout="wide", page_icon="🚀")
 
-# --- 2. TRATAMENTO DE HORÁRIO BRASÍLIA ---
-def get_brasilia_time():
-    # Retorna o datetime atual de Brasília
-    return datetime.now(pytz.timezone('America/Sao_Paulo')).replace(tzinfo=None)
+# URLs das Planilhas
+URL_ACESSOS = "https://docs.google.com/spreadsheets/d/1JD2KDxSAkezSeoF1Bi5h5w8BitIzip7IuR0g19fdouU/gviz/tq?tqx=out:csv&sheet=Acessos"
+URL_ESCALA = "https://docs.google.com/spreadsheets/d/1JD2KDxSAkezSeoF1Bi5h5w8BitIzip7IuR0g19fdouU/gviz/tq?tqx=out:csv&sheet=Escala"
 
-# --- 3. INICIALIZAÇÃO ---
+# --- 2. FUNÇÕES DE SUPORTE ---
+
+def get_brasilia_time():
+    """Retorna o horário atual de Brasília"""
+    try:
+        return datetime.now(pytz.timezone('America/Sao_Paulo')).replace(tzinfo=None)
+    except:
+        # Fallback caso pytz falhe (ajuste manual de -3h sobre o UTC comum em servers)
+        return datetime.utcnow() - timedelta(hours=3)
+
+def carregar_dados(url):
+    """Lê dados da planilha com cache buster para evitar dados obsoletos"""
+    try:
+        df = pd.read_csv(f"{url}&cache={int(time.time())}")
+        df.columns = df.columns.str.strip().str.lower()
+        return df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
+    except:
+        return pd.DataFrame()
+
+def formatar_tempo(inicio):
+    """Calcula a duração entre 'inicio' e agora"""
+    if inicio is None: return "00:00:00"
+    diff = get_brasilia_time() - inicio
+    total_segundos = int(diff.total_seconds())
+    horas, resto = divmod(total_segundos, 3600)
+    minutos, segundos = divmod(resto, 60)
+    return f"{horas:02d}:{minutos:02d}:{segundos:02d}"
+
+def verificar_aderencia(horario_planejado):
+    """Calcula atraso em relação à escala"""
+    try:
+        agora = get_brasilia_time()
+        hp = datetime.strptime(horario_planejado, "%H:%M").replace(
+            year=agora.year, month=agora.month, day=agora.day
+        )
+        if agora > hp and st.session_state.status in ["Disponível", "Offline"]:
+            atraso = int((agora - hp).total_seconds() / 60)
+            return f"⚠️ ATRASADO ({atraso} min)"
+        return "✅ EM DIA"
+    except: return "---"
+
+def registrar_log(tipo_evento):
+    """Salva evento no histórico da sessão"""
+    hora_atual = get_brasilia_time().strftime("%H:%M:%S")
+    st.session_state.historico_pausas.append({
+        "Evento": tipo_evento,
+        "Horário": hora_atual
+    })
+
+# --- 3. INICIALIZAÇÃO DO ESTADO ---
 if 'autenticado' not in st.session_state:
     st.session_state.update({
         'autenticado': False,
@@ -24,48 +72,8 @@ if 'autenticado' not in st.session_state:
         'historico_pausas': []
     })
 
-# --- 4. FUNÇÕES ---
-def carregar_dados(url):
-    try:
-        df = pd.read_csv(f"{url}&cache={int(time.time())}")
-        df.columns = df.columns.str.strip().str.lower()
-        return df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-    except: return pd.DataFrame()
+# --- 4. TELAS DO SISTEMA ---
 
-def formatar_tempo(inicio):
-    if inicio is None: return "00:00:00"
-    diff = get_brasilia_time() - inicio
-    total_segundos = int(diff.total_seconds())
-    horas, resto = divmod(total_segundos, 3600)
-    minutos, segundos = divmod(resto, 60)
-    return f"{horas:02d}:{minutos:02d}:{segundos:02d}"
-
-def registrar_log(tipo_evento):
-    hora_atual = get_brasilia_time().strftime("%H:%M:%S")
-    st.session_state.historico_pausas.append({
-        "Evento": tipo_evento,
-        "Horário": hora_atual
-    })
-
-def verificar_aderencia(horario_planejado):
-    """Retorna True se estiver atrasado para a pausa"""
-    try:
-        agora = get_brasilia_time()
-        hp = datetime.strptime(horario_planejado, "%H:%M").replace(
-            year=agora.year, month=agora.month, day=agora.day
-        )
-        # Se passou do horário e ele ainda está disponível ou offline
-        if agora > hp and st.session_state.status in ["Disponível", "Offline"]:
-            atraso = int((agora - hp).total_seconds() / 60)
-            return f"⚠️ ATRASADO ({atraso} min)"
-        return "✅ EM DIA"
-    except: return ""
-
-# URLs
-URL_ACESSOS = "https://docs.google.com/spreadsheets/d/1JD2KDxSAkezSeoF1Bi5h5w8BitIzip7IuR0g19fdouU/gviz/tq?tqx=out:csv&sheet=Acessos"
-URL_ESCALA = "https://docs.google.com/spreadsheets/d/1JD2KDxSAkezSeoF1Bi5h5w8BitIzip7IuR0g19fdouU/gviz/tq?tqx=out:csv&sheet=Escala"
-
-# --- 5. TELAS ---
 def tela_login():
     st.markdown("<h1 style='text-align: center;'>🚀 ConvertaX WFM</h1>", unsafe_allow_html=True)
     df_users = carregar_dados(URL_ACESSOS)
@@ -86,24 +94,11 @@ def tela_login():
                         })
                         registrar_log("Acesso ao Portal")
                         st.rerun()
-                st.error("Credenciais inválidas.")
+                st.error("Credenciais inválidas ou erro de conexão.")
 
-import streamlit as st
-import pandas as pd
-from datetime import datetime
-import time
-import pytz
-
-# --- FUNÇÃO DE APOIO PARA O GRUPO ---
-def determinar_status_estilizado(nome_colega):
-    # Simulação de status (No futuro, isso lerá a aba 'Logs' da planilha central)
-    # Por enquanto, exibe a escala para orientação do time
-    return "🕒 Agendado"
-
-# --- TELA DO AGENTE ATUALIZADA ---
 def tela_agente():
     agora_br = get_brasilia_time()
-    st.markdown(f"### 🚀 Expert: {st.session_state.usuario_nome} | 🕒 {agora_br.strftime('%H:%M:%S')}")
+    st.markdown(f"### Expert: {st.session_state.usuario_nome} | 🕒 {agora_br.strftime('%H:%M:%S')}")
     
     df_escala = carregar_dados(URL_ESCALA)
     p1, p2 = "00:00", "00:00"
@@ -113,99 +108,45 @@ def tela_agente():
         if not user_row.empty:
             p1, p2 = user_row.iloc[0]['pausa_1'], user_row.iloc[0]['pausa_2']
 
-    # --- MÉTRICAS DE ADERÊNCIA ---
+    # Indicadores de Aderência
     m1, m2, m3 = st.columns(3)
-    with m1:
-        st.metric("Minha Pausa 1", p1, delta=verificar_aderencia(p1), delta_color="inverse")
-    with m2:
-        st.metric("Minha Pausa 2", p2, delta=verificar_aderencia(p2), delta_color="inverse")
-    with m3:
-        st.metric("Cronômetro Atual", formatar_tempo(st.session_state.inicio_status))
+    with m1: st.metric("Sua Pausa 1", p1, delta=verificar_aderencia(p1), delta_color="inverse")
+    with m2: st.metric("Sua Pausa 2", p2, delta=verificar_aderencia(p2), delta_color="inverse")
+    with m3: st.metric("Tempo em Status", formatar_tempo(st.session_state.inicio_status))
 
     st.divider()
 
-    # --- LAYOUT PRINCIPAL ---
-    col_status, col_time = st.columns([1.5, 1])
+    col_ctrl, col_team = st.columns([1.3, 1])
 
-    with col_status:
-        st.subheader("🕹️ Meu Controle")
-        cor_alerta = "#ff4b4b" if "ATRASADO" in verificar_aderencia(p1) else "#00d1b2"
+    with col_ctrl:
+        st.subheader("🕹️ Meu Status")
+        # Estilo dinâmico baseado em aderência
+        inaderente = "ATRASADO" in verificar_aderencia(p1) or "ATRASADO" in verificar_aderencia(p2)
+        cor_foco = "#ff4b4b" if inaderente else "#00d1b2"
         
         st.markdown(f"""
-            <div style='text-align:center; background-color:#1e1e1e; padding:30px; border-radius:15px; border:3px solid {cor_alerta};'>
-                <p style='margin:0; font-size:20px; color:#bbb;'>STATUS ATUAL</p>
-                <h2 style='margin:0; color:white;'>{st.session_state.status.upper()}</h2>
-                <h1 style='color:{cor_alerta}; font-family:monospace; font-size:85px; margin:10px 0;'>{formatar_tempo(st.session_state.inicio_status)}</h1>
+            <div style='text-align:center; background-color:#1e1e1e; padding:25px; border-radius:15px; border:2px solid {cor_foco};'>
+                <p style='margin:0; color:#aaa; font-size:14px;'>VOCÊ ESTÁ ATUALMENTE EM:</p>
+                <h2 style='margin:0; color:white; letter-spacing: 2px;'>{st.session_state.status.upper()}</h2>
+                <h1 style='color:{cor_foco}; font-family:monospace; font-size:75px; margin:10px 0;'>{formatar_tempo(st.session_state.inicio_status)}</h1>
             </div>
         """, unsafe_allow_html=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # Botões de Status (Mesma lógica anterior)
         if st.session_state.status == "Offline":
-            if st.button("🏁 INICIAR TURNO", type="primary", use_container_width=True):
+            if st.button("🏁 FICAR DISPONÍVEL (INICIAR TURNO)", type="primary", use_container_width=True):
                 st.session_state.update({'status': "Disponível", 'inicio_status': get_brasilia_time()})
-                registrar_log("Início de Turno")
-                st.rerun()
-        elif st.session_state.status == "Disponível":
-            c_b1, c_b2, c_b3 = st.columns(3)
-            if c_b1.button("☕ Pausa 1", use_container_width=True):
-                st.session_state.update({'status': "Em Pausa 1", 'inicio_status': get_brasilia_time()})
-                registrar_log("Início Pausa 1"); st.rerun()
-            if c_b2.button("🚻 Banheiro", use_container_width=True):
-                st.session_state.update({'status': "Banheiro", 'inicio_status': get_brasilia_time()})
-                registrar_log("Início Banheiro"); st.rerun()
-            if c_b3.button("🏥 Médico/FB", use_container_width=True):
-                st.session_state.update({'status': "Médico/Feedback", 'inicio_status': get_brasilia_time()})
-                registrar_log("Início Médico/FB"); st.rerun()
-        else:
-            if st.button("🟢 RETORNEI (VOLTAR DISPONÍVEL)", type="primary", use_container_width=True):
-                registrar_log(f"Retorno de {st.session_state.status}")
-                st.session_state.update({'status': "Disponível", 'inicio_status': get_brasilia_time()})
-                st.rerun()
-
-    with col_time:
-        st.subheader("👥 Autonomia de Time")
-        st.caption("Veja quem divide a janela de pausa com você:")
+                registrar_log("Início de Turno"); st.rerun()
         
-        if not df_escala.empty:
-            # Filtra colegas que têm a mesma Pausa 1 (Lanche)
-            colegas = df_escala[df_escala['pausa_1'] == p1].copy()
-            
-            for _, row in colegas.iterrows():
-                is_me = " (Eu)" if row['nome'].lower() == st.session_state.usuario_nome.lower() else ""
-                # Estilização baseada em quem está com você
-                bg_color = "#2e3136" if is_me == "" else "#0e6355"
-                
-                st.markdown(f"""
-                    <div style='background-color:{bg_color}; padding:12px; border-radius:8px; margin-bottom:8px; border-left:5px solid #00d1b2;'>
-                        <div style='display:flex; justify-content:between; align-items:center;'>
-                            <b style='font-size:16px;'>{row['nome']}{is_me}</b>
-                        </div>
-                        <div style='display:flex; justify-content:space-between; font-size:13px; color:#aaa;'>
-                            <span>Previsto: {row['pausa_1']}</span>
-                            <span style='color:#00d1b2;'>Status: {determinar_status_estilizado(row['nome'])}</span>
-                        </div>
-                    </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.warning("Escala não carregada.")
-
-    # --- HISTÓRICO ---
-    st.divider()
-    with st.expander("📝 Meu Histórico de Registros (Hoje)", expanded=False):
-        if st.session_state.historico_pausas:
-            st.dataframe(pd.DataFrame(st.session_state.historico_pausas), use_container_width=True)
-
-# --- 6. ADMIN / NAVEGAÇÃO ---
-if not st.session_state.autenticado:
-    tela_login()
-else:
-    if st.session_state.perfil == "Admin":
-        st.title("🛡️ Painel Admin")
-        st.dataframe(carregar_dados(URL_ESCALA), use_container_width=True)
-    else:
-        tela_agente()
-    
-    time.sleep(1)
-    st.rerun()
+        elif st.session_state.status == "Disponível":
+            btn_cols = st.columns(3)
+            if btn_cols[0].button("☕ Pausa 1", use_container_width=True):
+                st.session_state.update({'status': "Pausa 1", 'inicio_status': get_brasilia_time()})
+                registrar_log("Iniciou Pausa 1"); st.rerun()
+            if btn_cols[1].button("🚻 Banheiro", use_container_width=True):
+                st.session_state.update({'status': "Banheiro", 'inicio_status': get_brasilia_time()})
+                registrar_log("Iniciou Banheiro"); st.rerun()
+            if btn_cols[2].button("🏥 Outros/FB", use_container_width=True):
+                st.session_state.update({'status': "Feedback/Médico", 'inicio_status': get_brasilia_time()})
+                registrar_log("Iniciou Feedback/Médico"); st.rerun()
