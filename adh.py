@@ -3,64 +3,73 @@ import pandas as pd
 from datetime import datetime, timedelta
 import time
 
-# Configurações da Página
-st.set_page_config(page_title="WFM ConvertaX", page_icon="⏳", layout="wide")
+# --- FUNÇÕES DE APOIO ---
+def calcular_tempo(inicio):
+    """Calcula a diferença entre agora e o início do status"""
+    if not inicio: return "00:00"
+    diff = datetime.now() - inicio
+    minutos, segundos = divmod(diff.seconds, 60)
+    return f"{minutos:02d}:{segundos:02d}"
 
-# Estilização Profissional
-st.markdown("""
-    <style>
-    .main { background-color: #0e1117; }
-    .cronometro { font-size: 80px; font-weight: bold; text-align: center; color: #00d1b2; font-family: 'Courier New', monospace; }
-    .incidente-box { background-color: #3e1212; padding: 15px; border-radius: 10px; border: 1px solid #ff4b4b; }
-    .expert-card { background-color: #1e1e1e; padding: 20px; border-radius: 15px; border: 1px solid #333; }
-    </style>
-    """, unsafe_allow_html=True)
+# --- VISÃO DO AGENTE ---
+def tela_agente():
+    st.title(f"Painel do Expert: {st.session_state.usuario_nome}")
+    
+    # Simulação de dados vindo do banco
+    status_atual = st.session_state.get('status', 'Disponível')
+    inicio_status = st.session_state.get('inicio_status', datetime.now())
 
-# Título
-st.title("🚀 Portal WFM ConvertaX")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Status Atual", status_atual)
+    with col2:
+        # Cronômetro de tempo no status atual
+        tempo_decorrido = calcular_tempo(inicio_status)
+        st.metric("Tempo no Status", tempo_decorrido)
+    with col3:
+        st.metric("Sua Próxima Pausa", "21:30")
 
-# Sidebar para Login e Status
-with st.sidebar:
-    st.header("👤 Área do Expert")
-    expert = st.selectbox("Selecione seu nome:", ["Francielle", "Lucas Ryann", "Gabriele", "Ana Antuane"])
-    st.success(f"Logado como: {expert}")
+    # Botões de Ação
+    c1, c2 = st.columns(2)
+    if status_atual != "Em Pausa":
+        if c1.button("☕ INICIAR PAUSA", use_container_width=True):
+            st.session_state.status = "Em Pausa"
+            st.session_state.inicio_status = datetime.now()
+            # AQUI: Comando para salvar na planilha: status='Em Pausa'
+            st.rerun()
+    else:
+        if c1.button("🟢 VOLTAR PARA ATENDIMENTO", use_container_width=True):
+            st.session_state.status = "Em Atendimento"
+            st.session_state.inicio_status = datetime.now()
+            st.rerun()
+
     st.divider()
-    st.info("💡 Lembre-se de limpar o cache se o sistema apresentar lentidão.")
+    exibir_esteira_geral()
 
-# Layout principal
-col_esq, col_dir = st.columns([2, 1])
+# --- A ESTEIRA (VISÃO PARA TODOS) ---
+def exibir_esteira_geral():
+    st.subheader("📋 Esteira de Operação em Tempo Real")
+    
+    # Simulação de dados de todos os agentes (Isso virá do seu Sheets)
+    dados_esteira = [
+        {"Agente": "Francielle", "Status": "Em Atendimento", "Início": datetime.now() - timedelta(minutes=45), "Pausa": "21:00"},
+        {"Agente": "Lucas Ryann", "Status": "Em Pausa", "Início": datetime.now() - timedelta(minutes=5), "Pausa": "21:00"},
+        {"Agente": "Gabriele", "Status": "Disponível", "Início": datetime.now() - timedelta(minutes=2), "Pausa": "21:10"},
+    ]
+    
+    df_esteira = pd.DataFrame(dados_esteira)
+    df_esteira['Tempo no Status'] = df_esteira['Início'].apply(calcular_tempo)
 
-with col_esq:
-    st.markdown("<div class='expert-card'>", unsafe_allow_html=True)
-    st.write(f"### Bem-vinda, {expert}! 👋")
-    
-    # Horário planejado (exemplo fixo enquanto não conectamos a planilha)
-    hora_pausa = "21:30"
-    st.write(f"📅 Sua próxima pausa está agendada para: **{hora_pausa}**")
-    
-    # Simulação de Cronômetro
-    st.markdown("<div class='cronometro'>00:03:00</div>", unsafe_allow_html=True)
-    
-    if st.button("▶️ REGISTRAR INÍCIO DE PAUSA"):
-        st.balloons()
-        st.success("Pausa registrada! Aderência salva no banco de dados.")
-    st.markdown("</div>", unsafe_allow_html=True)
+    # Estilização da Tabela
+    def color_status(val):
+        color = '#00d1b2' if val == 'Em Atendimento' else '#ff4b4b' if val == 'Em Pausa' else '#fdfd96'
+        return f'color: {color}; font-weight: bold'
 
-with col_dir:
-    # SEÇÃO DE INCIDENTES (O que você acabou de formatar)
-    st.subheader("🚨 Incidentes Ativos")
-    st.markdown(f"""
-    <div class='incidente-box'>
-        <b>Lentidão Backoffice (CASSINO/VERA)</b><br>
-        <small>Identificado: 29/04/2026 às 23:41</small><br><br>
-        <i>Status: Impacto direto nas análises operacionais. Time técnico já notificado.</i>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.divider()
-    st.subheader("📅 Grupo de Pausa")
-    # Tabela simples simulando sua planilha de grupos
-    st.table(pd.DataFrame({
-        "Expert": ["Francielle", "Lucas Ryann", "Esteffanny"],
-        "Pausa": ["19:00", "19:00", "19:10"]
-    }))
+    st.table(df_esteira[['Agente', 'Status', 'Tempo no Status', 'Pausa']].style.applymap(color_status, subset=['Status']))
+
+# --- ATUALIZAÇÃO AUTOMÁTICA ---
+# Isso faz o site atualizar sozinho a cada 30 segundos para mostrar o tempo correndo
+if st.session_state.autenticado:
+    time.sleep(30)
+    st.rerun()
